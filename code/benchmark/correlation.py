@@ -1,12 +1,12 @@
 import numpy as np
-import pandas as pd
 from statsmodels.tsa.stattools import grangercausalitytests
-from scipy.spatial.distance import cosine, euclidean
+from scipy.spatial.distance import euclidean
 import matplotlib.pyplot as plt
 import seaborn as sns
 from fastdtw import fastdtw
 from sklearn.preprocessing import normalize
-from sklearn.metrics.pairwise import pairwise_distances
+from numba import jit
+
 
 def correntropy_PCA(A, s=5):
     """
@@ -49,6 +49,7 @@ def granger_causality(A, maxlag=3):
     return res
 
 
+@jit(nopython=True, fastmath=True)
 def cosine_similarity(A):
     """
     https://en.wikipedia.org/wiki/Cosine_similarity
@@ -58,7 +59,9 @@ def cosine_similarity(A):
     res = np.empty((A.shape[0], A.shape[0]))
     for i, elem1 in enumerate(A):
         for j, elem2 in enumerate(A):
-            res[i, j] = 1 - cosine(elem1, elem2)
+            res[i, j] = \
+                (np.ascontiguousarray(elem1) @ np.ascontiguousarray(elem2)) / \
+                (np.linalg.norm(elem1) * np.linalg.norm(elem2))
     return res
 
 
@@ -75,18 +78,22 @@ def dynamic_time_warping(A):
             distance, _ = fastdtw(elem1, elem2, dist=euclidean)
             res[i, j] = distance
     # scale to be between 0 and 1
-    res = np.abs(res - np.max(res))/(np.max(res) - np.min(res))
+    res = np.abs(res - np.max(res)) / (np.max(res) - np.min(res))
     return res
+
+
+def dummy_correlation(A):
+    return np.ones((A.shape[0], A.shape[0]))
 
 
 if __name__ == '__main__':
     matrix = np.random.randint(1, 30, (50, 10, 14)).astype(float)
     plt.figure(1)
-    ax = sns.heatmap(granger_causality(matrix[0]), cmap='viridis', linewidth=0.5)
-    plt.savefig('test.pdf')
+    ax = sns.heatmap(dummy_correlation(matrix[0]), cmap='viridis',
+                     linewidth=0.5)
     plt.show()
 
     plt.figure(2)
-    ax2 = sns.heatmap(np.corrcoef(matrix[0]), cmap='viridis', linewidth=0.5)
-    plt.savefig('test2.pdf')
+    ax2 = sns.heatmap(granger_causality(matrix[0]), cmap='viridis', linewidth=0.5)
+    plt.show()
     pass

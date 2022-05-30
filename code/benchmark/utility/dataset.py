@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 from tqdm import tqdm
-from scipy.stats import skew, kurtosis
 from utility.constant import SEQUENCE_LENGHT, VERBOSE
 
 # set seaborn
@@ -51,27 +50,14 @@ class Dataset:
                 freq='D')
         ].values
 
-        # reshape in order to have (stores, products, dates)
+        # reshape in order to have (products, stores, dates)
         group_store = all_sequence.reshape((-1, 10, SEQUENCE_LENGHT))
 
         store_corr = np.stack([correlation_fn(i) for i in group_store], axis=0)
 
-        store_features = np.stack([
-            group_store.mean(axis=2),
-            group_store[:, :, int(SEQUENCE_LENGHT / 2):].mean(axis=2),
-            group_store.std(axis=2),
-            group_store[:, :, int(SEQUENCE_LENGHT / 2):].std(axis=2),
-            skew(group_store, axis=2),
-            kurtosis(group_store, axis=2),
-            np.apply_along_axis(
-                lambda x: np.polyfit(np.arange(0, SEQUENCE_LENGHT), x, 1)[0],
-                2, group_store)
-        ], axis=1)
+        # group_store = np.transpose(group_store, (0, 2, 1))
 
-        group_store = np.transpose(group_store, (0, 2, 1))
-        store_features = np.transpose(store_features, (0, 2, 1))
-
-        return group_store, store_corr, store_features
+        return group_store, store_corr
 
     def get_features(self, start, end, correlation_fn):
         """
@@ -81,12 +67,12 @@ class Dataset:
         :param correlation_fn:
         :return:
         """
-        x_seq, x_cor, x_feat, y = [], [], [], []
+        x_seq, x_cor, y = [], [], []
 
         for date in tqdm(
                 pd.date_range(start + timedelta(days=SEQUENCE_LENGHT), end)
         ):
-            cur_seq, cur_corr, cur_feat = self.__create_features(
+            cur_seq, cur_corr = self.__create_features(
                 date,
                 correlation_fn
             )
@@ -94,7 +80,6 @@ class Dataset:
             # x sequence, correlation and features
             x_seq.append(cur_seq)
             x_cor.append(cur_corr)
-            x_feat.append(cur_feat)
 
             # add the labels
             y.append(self.df[pd.to_datetime(start)].values.reshape((-1, 10)))
@@ -102,13 +87,12 @@ class Dataset:
         # create numpy arrays with right type for x and y
         x_seq = np.concatenate(x_seq, axis=0).astype('float16')
         x_cor = np.concatenate(x_cor, axis=0).astype('float16')
-        x_feat = np.concatenate(x_feat, axis=0).astype('float16')
         y = np.concatenate(y, axis=0).astype('float16')
 
         if VERBOSE:
-            print(x_seq.shape, x_cor.shape, x_feat.shape, y.shape)
+            print(x_seq.shape, x_cor.shape, y.shape)
 
-        return x_seq, x_cor, x_feat, y
+        return x_seq, x_cor, y
 
     def plot_timespan(self, initial_date, period, idx):
         """

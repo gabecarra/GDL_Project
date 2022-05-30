@@ -7,7 +7,7 @@ import os
 import random
 import numpy as np
 import tensorflow as tf
-from correlation import granger_causality, cosine_similarity
+from correlation import granger_causality, cosine_similarity, dummy_correlation
 
 
 tf.random.set_seed(SEED)
@@ -19,14 +19,13 @@ if __name__ == '__main__':
 
     dataset = Dataset('data/train.csv')
 
-    train_date = (date(2013, 1, 1), date(2015, 1, 1))
-    val_date = (date(2015, 1, 1), date(2016, 1, 1))
+    train_date = (date(2013, 1, 1), date(2013, 2, 1))
+    val_date = (date(2015, 1, 1), date(2015, 2, 1))
     test_date = (date(2016, 1, 1), date(2016, 12, 31))
 
     corr_functions = [
-        np.corrcoef,
-        granger_causality,
-        cosine_similarity
+        dummy_correlation,
+        np.corrcoef
     ]
 
     for idx, corr_function in enumerate(corr_functions):
@@ -42,7 +41,7 @@ if __name__ == '__main__':
         )
 
         for i, elem in enumerate(train):
-            np.save('numpy data/train' + str(i) + 'npy', elem)
+            np.save('numpy data/train' + str(i), elem)
 
         save_correlation(train[1][0], corr_function.__name__ + '_train')
 
@@ -53,7 +52,7 @@ if __name__ == '__main__':
         )
 
         for i, elem in enumerate(validation):
-            np.save('numpy data/validation' + str(i) + 'npy', elem)
+            np.save('numpy data/validation' + str(i), elem)
 
         save_correlation(validation[1][0], corr_function.__name__ + '_val')
 
@@ -64,18 +63,16 @@ if __name__ == '__main__':
         )
 
         for i, elem in enumerate(test):
-            np.save('numpy data/test' + str(i) + 'npy', elem)
+            np.save('numpy data/test' + str(i), elem)
 
         save_correlation(validation[1][0], corr_function.__name__ + '_test')
 
         model = GraphConvModel(
             SEQUENCE_LENGHT,
-            train[2].shape[-1],
             corr_function.__name__
         )
-        if VERBOSE:
-            model.summary()
-        model.train(train, validation, test)
+        model.summary()
+        model.train(train, validation)
         model.save('models/' + corr_function.__name__)
         y_pred, y = model.predict(test)
         model.plot_predictions(y, y_pred, 7, 15)
