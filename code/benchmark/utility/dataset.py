@@ -12,7 +12,8 @@ sns.set_theme(style='ticks')
 
 class Dataset:
     def __init__(self, path):
-        print(f'Reading dataset from {path}')
+        if VERBOSE:
+            print(f'Reading dataset from {path}')
         self.df = pd.read_csv(path)
         self.df['date'] = pd.to_datetime(self.df['date'])
         self.df['id'] = self.df['item'].astype(str) +\
@@ -22,9 +23,10 @@ class Dataset:
         self.df = self.df.astype(float).unstack()
         self.df.columns = self.df.columns.get_level_values(1)
         self.df.sort_index(inplace=True)
-
-        print(f'Dataset shape:  {self.df.shape}')
-        print(self.df.head())
+        # self.df.apply(remove_periodicity, axis=1, raw=True)
+        if VERBOSE:
+            print(f'Dataset shape:  {self.df.shape}')
+            print(self.df.head())
 
     def get_df(self):
         """
@@ -115,12 +117,75 @@ class Dataset:
         plt.legend(loc='center left', bbox_to_anchor=(1.0, 0.5))
         plt.show()
 
+    def fit_polynomial(self, initial_date, period=None):
+        temp = self.df
+        if period:
+            temp = self.df[
+                pd.date_range(
+                    initial_date - timedelta(days=period),
+                    periods=period,
+                    freq='D')
+            ]
+        temp = temp.iloc[0]
+        X = [i % 365 for i in range(0, len(temp))]
+        y = temp.values
+        degree = 4
+        coef = np.polyfit(X, y, degree)
+        print('Coefficients: %s' % coef)
+        # create curve
+        curve = list()
+        for i in range(len(X)):
+            value = coef[-1]
+            for d in range(degree):
+                value += X[i] ** (degree - d) * coef[d]
+            curve.append(value)
+
+        values = temp.values
+        diff = list()
+        for i in range(len(values)):
+            value = values[i] - curve[i]
+            diff.append(value)
+        # plot curve over original data
+        plt.figure(1, figsize=(14, 5))
+        plt.plot(temp.T.values)
+        plt.ylabel('sales')
+        plt.legend(loc='center left', bbox_to_anchor=(1.0, 0.5))
+        plt.plot(curve, color='red', linewidth=3)
+
+        plt.figure(2, figsize=(14, 5))
+        plt.plot(diff)
+        plt.show()
+
+
+def remove_periodicity(y, degree=4):
+    X = [i % 365 for i in range(0, len(y))]
+    coef = np.polyfit(X, y, degree)
+    for i in range(len(X)):
+        value = coef[-1]
+        for d in range(degree):
+            value += X[i] ** (degree - d) * coef[d]
+        y[i] = y[i] - value
+    return y
+
 
 if __name__ == '__main__':
     dataset = Dataset('../data/train.csv')
     # dataset.plot_timespan(date(2017, 11, 1), 30, idx=(0, 10))
-    train_date = date(2013, 1, 1)
-    valid_date = date(2015, 1, 1)
-    test_date = date(2016, 1, 1)
-    dataset.get_features(train_date, valid_date, np.corrcoef)
+    # train_date = (date(2013, 1, 1), date(2016, 1, 1))
+    # val_date = (date(2016, 1, 1), date(2017, 1, 1))
+    # test_date = (date(2017, 1, 1), date(2017, 4, 1))
+    # train = dataset.get_features(
+    #     train_date[0],
+    #     train_date[1],
+    #     np.corrcoef
+    # )
+    # dataset.fit_polynomial(date(2015, 1, 1))
+    dataset.df.iloc[0].T.plot(figsize=(14, 5))
+    plt.show()
+    dataset.df.apply(remove_periodicity, axis=1, raw=True)
+    dataset.df.iloc[0].T.plot(figsize=(14, 5))
+    plt.show()
+
+    # dataset.plot_timespan(date(2017, 11, 1), 365 * 4, idx=(0, 1))
+    # dataset.plot_timespan(date(2017, 11, 1), 365 * 4, idx=(15, 16))
     pass

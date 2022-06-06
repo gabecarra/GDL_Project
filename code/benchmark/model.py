@@ -4,6 +4,7 @@ from keras.optimizers import Adam
 from keras.layers import Dense, Dropout, Input, LSTM,\
     BatchNormalization, CuDNNLSTM
 from spektral.layers import GCNConv
+from spektral.layers.pooling import GlobalMaxPool
 from keras.callbacks import EarlyStopping
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -12,6 +13,7 @@ from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+import json
 
 sns.set_theme(style='ticks')
 
@@ -27,17 +29,13 @@ class GraphConvModel:
 
         x = GCNConv(256, activation='relu')([inp_feat, inp_lap])
         x = GCNConv(128, activation='relu')([x, inp_lap])
-        x = GCNConv(64, activation='relu')([x, inp_lap])
-
-        x = LSTM(64, activation='relu', return_sequences=True)(x)
-        x = LSTM(32, activation='relu')(x)
+        x = CuDNNLSTM(128, return_sequences=True)(x)
+        x = CuDNNLSTM(64)(x)
+        # x = LSTM(64, activation='relu', return_sequences=True)(x)
+        # x = LSTM(32, activation='relu')(x)
 
         x = BatchNormalization()(x)
-        x = Dropout(0.5)(x)
-        x = Dense(256, activation='relu')(x)
-        x = Dropout(0.3)(x)
         x = Dense(128, activation='relu')(x)
-        x = Dropout(0.3)(x)
         x = Dense(32, activation='relu')(x)
         x = Dropout(0.3)(x)
         out = Dense(1)(x)
@@ -84,7 +82,7 @@ class GraphConvModel:
         for store in range(10):
             print('-------', 'store', store, '-------')
 
-            es = EarlyStopping(patience=5, verbose=1, min_delta=0.001,
+            es = EarlyStopping(patience=5, verbose=0, min_delta=0.001,
                                monitor='val_loss', mode='auto',
                                restore_best_weights=True)
 
@@ -96,7 +94,7 @@ class GraphConvModel:
                     y_val[:, store]
                 ),
                 callbacks=[es],
-                verbose=1
+                verbose=0
             )
             if steps:
                 steps.append(
@@ -156,14 +154,19 @@ class GraphConvModel:
                                                       y_pred[:, store]))
             print(f'Store {store} MSE: {error[store]}')
             tot_error += error[store]
-        print(f'Tot MSE: {tot_error/10}')
+
+        json_data = error.copy()
+        json_data['tot_error'] = tot_error / 10
+        print(f'Tot MSE: {json_data["tot_error"]}')
+        with open('results/MSE/' + self.name + '.json', 'w') as outfile:
+            json.dump(json_data, outfile)
 
         plt.figure(figsize=(14, 5))
         plt.bar(range(10), error.values())
         plt.xticks(range(10), ['store_' + str(s) for s in range(10)])
-        plt.ylabel('error')
+        plt.ylabel('errors')
         np.set_printoptions(False)
-        plt.show()
+        plt.savefig('results/plots/errors/' + self.name + '.pdf')
 
     def plot_predictions(self, y_true, y_pred, store, item):
         """
@@ -185,7 +188,6 @@ class GraphConvModel:
         plt.legend()
         plt.ylabel('sales')
         plt.xlabel('date')
-        plt.show()
         plt.savefig('results/plots/predictions/' + self.name + '.pdf')
 
     def __plot_history(self, rmse, val_rmse, loss, val_loss, steps):
@@ -238,7 +240,7 @@ class GraphConvModel:
         y = self.scaler_seq.transform(y)
 
         # laplacian preprocessing for graph convolutional layer
-        x_cor = gcn_filter(1 - np.abs(x_cor))
+        x_cor = gcn_filter(x_cor)
 
         return x_seq, x_cor, y
 
