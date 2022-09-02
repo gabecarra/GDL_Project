@@ -39,18 +39,24 @@ if __name__ == '__main__':
 
     correlation = Correlation(dataset)
 
-    for method in correlation.get_correlation_methods():
+    for method in ['true'] + correlation.get_correlation_methods():
         for n_exp in range(5):
             if os.path.isfile('numpy data/' + method + '.npy'):
                 adj = np.load('numpy data/' + method + '.npy')
             else:
-                adj = correlation.get_correlation(
-                    method=method,
-                    threshold=0.1,
-                    include_self=False,
-                    normalize_axis=1,
-                    layout="dense"
-                )
+                if method == 'true':
+                    adj = dataset.get_connectivity(threshold=0.1,
+                                                   include_self=False,
+                                                   normalize_axis=1,
+                                                   layout="dense")
+                else:
+                    adj = correlation.get_correlation(
+                        method=method,
+                        threshold=0.1,
+                        include_self=False,
+                        normalize_axis=1,
+                        layout="dense"
+                    )
                 np.save('numpy data/' + method, adj)
 
             adj = adj_to_edge_index(adj)
@@ -113,7 +119,7 @@ if __name__ == '__main__':
                 mode='min',
             )
 
-            trainer = pl.Trainer(max_epochs=4,
+            trainer = pl.Trainer(max_epochs=100,
                                  logger=logger,
                                  gpus=1 if torch.cuda.is_available() else None,
                                  limit_train_batches=100,

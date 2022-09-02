@@ -10,6 +10,7 @@ from numba import jit
 
 class Correlation:
     def __init__(self, dataset):
+        self.dataset = dataset
         df = dataset.dataframe()
         df = df.droplevel(1, axis=1).T
         self.data = df.to_numpy()
@@ -19,7 +20,9 @@ class Correlation:
         return self.data
 
     def _get_similarity(self, method):
-        if method == 'full':
+        if method == 'random':
+            return np.random.rand(self.n_nodes, self.n_nodes)
+        elif method == 'full':
             return np.ones((self.n_nodes, self.n_nodes))
         elif method == 'identity':
             return np.eye(self.n_nodes)
@@ -36,7 +39,7 @@ class Correlation:
         pass
 
     def get_correlation_methods(self):
-        return ['full', 'identity', 'pearson', 'cosine', 'granger', 'dtw']
+        return ['random', 'full', 'identity', 'pearson', 'cosine', 'granger', 'dtw']
 
     def get_correlation(self,
                         method,
