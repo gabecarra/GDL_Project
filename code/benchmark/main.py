@@ -1,100 +1,127 @@
-from utility.dataset import Dataset
-from utility.constant import SEED, SEQUENCE_LENGHT, VERBOSE
-from utility.plot import save_correlation
-from model import GraphConvModel
-from datetime import date
-import os
-import random
+import torch
+import tsl
 import numpy as np
-import tensorflow as tf
-from correlation import granger_causality, cosine_similarity, dtw, dummy_correlation, pearson_correlation
+from tsl.datasets import MetrLA
+from tsl.data import SpatioTemporalDataset
+from tsl.data import SpatioTemporalDataModule
+from tsl.data.preprocessing import StandardScaler
+from tsl.nn.metrics.metrics import MaskedMAE, MaskedMAPE
+from tsl.predictors import Predictor
+from model import TimeThenSpaceModel
+from pytorch_lightning.loggers import CSVLogger
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+import seaborn
+from utility.correlation import Correlation
+import random
+from tsl.ops.connectivity import adj_to_edge_index
+import os
 
-
-tf.random.set_seed(SEED)
-os.environ['PYTHONHASHSEED'] = str(SEED)
-np.random.seed(SEED)
-random.seed(SEED)
+seaborn.set()
 
 if __name__ == '__main__':
 
-    dataset = Dataset('data/train.csv')
+    # reproducibility
+    torch.manual_seed(0)
+    random.seed(0)
+    np.random.seed(0)
+    os.environ['PYTHONHASHSEED'] = str(0)
+    # log suppression
+    np.set_printoptions(suppress=True)
+    tsl.logger.disabled = True
 
-    train_date = (date(2013, 1, 1), date(2015, 1, 1))
-    val_date = (date(2015, 1, 1), date(2016, 1, 1))
-    test_date = (date(2016, 1, 1), date(2016, 12, 31))
+    # dataset creation
+    dataset = MetrLA()
 
-    corr_functions = [
-        granger_causality,
-        pearson_correlation,
-        dummy_correlation,
-        dtw,
-        cosine_similarity,
+    correlation = Correlation(dataset)
 
-    ]
+    for method in correlation.get_correlation_methods():
+        for n_exp in range(5):
+            if os.path.isfile('numpy data/' + method + '.npy'):
+                adj = np.load('numpy data/' + method + '.npy')
+            else:
+                adj = correlation.get_correlation(
+                    method=method,
+                    threshold=0.1,
+                    include_self=False,
+                    normalize_axis=1,
+                    layout="dense"
+                )
+                np.save('numpy data/' + method, adj)
 
-    for idx, corr_function in enumerate(corr_functions):
-        print()
-        print(f'   TEST #{idx}   '.center(78, '='))
-        print(f'- correlation method: {corr_function.__name__} \n')
+            adj = adj_to_edge_index(adj)
 
-        print('Generating features')
+            torch_dataset = SpatioTemporalDataset(*dataset.numpy(return_idx=True),
+                                                  connectivity=adj,
+                                                  mask=dataset.mask,
+                                                  horizon=12,
+                                                  window=12)
 
-        train = []
-        if corr_function.__name__ == 'granger_causality':
-            for i in range(3):
-                train.append(np.load('numpy data/train' + str(i) + '.npy'))
-            train = tuple(train)
-        else:
-            train = dataset.get_features(
-                train_date[0],
-                train_date[1],
-                corr_function
+            scalers = {'data': StandardScaler(axis=(0, 1))}
+
+            splitter = dataset.get_splitter(val_len=0.1, test_len=0.2)
+
+            dm = SpatioTemporalDataModule(
+                dataset=torch_dataset,
+                scalers=scalers,
+                splitter=splitter,
+                batch_size=64
             )
 
-        # for i, elem in enumerate(train):
-        #     np.save('numpy data/train' + str(i), elem)
+            dm.setup()
 
-        save_correlation(train[1][0], corr_function.__name__ + '_train')
+            # Train
 
-        validation = []
-        if corr_function.__name__ == 'granger_causality':
-            for i in range(3):
-                validation.append(np.load('numpy data/validation' + str(i) + '.npy'))
-            validation = tuple(validation)
-        else:
-            validation = dataset.get_features(
-                val_date[0],
-                val_date[1],
-                corr_function
+            loss_fn = MaskedMAE(compute_on_step=True)
+
+            metrics = {
+                'mae': MaskedMAE(compute_on_step=False),
+                'mape': MaskedMAPE(compute_on_step=False),
+                'mae_at_15': MaskedMAE(compute_on_step=False, at=2),
+                'mae_at_30': MaskedMAE(compute_on_step=False, at=5),
+                'mae_at_60': MaskedMAE(compute_on_step=False, at=11),
+            }
+
+            model_kwargs = {
+                'input_size': dm.n_channels,  # 1 channel
+                'horizon': dm.horizon,  # 12, the number of steps ahead to forecast
+                'hidden_size': 32,
+                'rnn_layers': 1,
+                'gcn_layers': 2
+            }
+
+            # setup predictor
+            predictor = Predictor(
+                model_class=TimeThenSpaceModel,
+                model_kwargs=model_kwargs,
+                optim_class=torch.optim.Adam,
+                optim_kwargs={'lr': 0.001},
+                loss_fn=loss_fn,
+                metrics=metrics
             )
 
-        # for i, elem in enumerate(validation):
-        #     np.save('numpy data/validation' + str(i), elem)
+            logger = CSVLogger(save_dir="logs", name=method)
 
-        save_correlation(validation[1][0], corr_function.__name__ + '_val')
-
-        test = []
-        if corr_function.__name__ == 'granger_causality':
-            for i in range(3):
-                test.append(np.load('numpy data/test' + str(i) + '.npy'))
-            test = tuple(test)
-        else:
-            test = dataset.get_features(
-                test_date[0],
-                test_date[1],
-                corr_function
+            checkpoint_callback = ModelCheckpoint(
+                dirpath='logs',
+                save_top_k=1,
+                monitor='val_mae',
+                mode='min',
             )
 
-        # for i, elem in enumerate(test):
-        #     np.save('numpy data/test' + str(i), elem)
+            trainer = pl.Trainer(max_epochs=2,
+                                 logger=logger,
+                                 gpus=1 if torch.cuda.is_available() else None,
+                                 limit_train_batches=100,
+                                 callbacks=[
+                                     checkpoint_callback,
+                                     EarlyStopping(monitor="val_loss",
+                                                   mode="min", patience=3)])
 
-        save_correlation(validation[1][0], corr_function.__name__ + '_test')
+            trainer.fit(predictor, datamodule=dm)
 
-        model = GraphConvModel(
-            SEQUENCE_LENGHT,
-            corr_function.__name__
-        )
-        model.train(train, validation)
-        # model.save('models/' + corr_function.__name__)
-        y_pred, y = model.predict(test)
-        model.plot_predictions(y, y_pred, 7, 15)
+            predictor.load_model(checkpoint_callback.best_model_path)
+            predictor.freeze()
+
+            performance = trainer.test(predictor, datamodule=dm)
+        print(performance)
