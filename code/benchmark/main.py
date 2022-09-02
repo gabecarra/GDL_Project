@@ -16,6 +16,7 @@ from utility.correlation import Correlation
 import random
 from tsl.ops.connectivity import adj_to_edge_index
 import os
+import json
 
 seaborn.set()
 
@@ -29,6 +30,9 @@ if __name__ == '__main__':
     # log suppression
     np.set_printoptions(suppress=True)
     tsl.logger.disabled = True
+
+    if not os.path.exists('numpy data'):
+        os.makedirs('numpy data')
 
     # dataset creation
     dataset = MetrLA()
@@ -109,7 +113,7 @@ if __name__ == '__main__':
                 mode='min',
             )
 
-            trainer = pl.Trainer(max_epochs=2,
+            trainer = pl.Trainer(max_epochs=4,
                                  logger=logger,
                                  gpus=1 if torch.cuda.is_available() else None,
                                  limit_train_batches=100,
@@ -124,4 +128,8 @@ if __name__ == '__main__':
             predictor.freeze()
 
             performance = trainer.test(predictor, datamodule=dm)
-        print(performance)
+            directory = 'results/' + method + '/' + 'version_' + str(n_exp) + '/'
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+            with open(directory + 'res.json', 'w') as outfile:
+                json.dump(performance[0], outfile)
