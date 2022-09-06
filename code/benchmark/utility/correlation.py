@@ -1,8 +1,8 @@
-import seaborn as sns
 import numpy as np
 from tqdm import tqdm
 from scipy.spatial.distance import euclidean
 from fastdtw import fastdtw
+from sklearn.metrics.pairwise import pairwise_distances
 from tsl.ops.connectivity import adj_to_edge_index
 from statsmodels.tsa.stattools import grangercausalitytests
 from numba import jit
@@ -39,7 +39,7 @@ class Correlation:
         pass
 
     def get_correlation_methods(self):
-        return ['random', 'full', 'identity', 'pearson', 'cosine', 'granger', 'dtw']
+        return ['random', 'full', 'identity', 'pearson', 'cosine', 'granger']
 
     def get_correlation(self,
                         method,
@@ -96,6 +96,7 @@ def _granger_causality(A, maxlag=2):
             res[i, j] = test_res[maxlag][0]['ssr_ftest'][1]
     return res
 
+
 def _dtw(A, window=3):
     """
     https://towardsdatascience.com/dynamic-time-warping-3933f25fcdd
@@ -109,4 +110,25 @@ def _dtw(A, window=3):
         for j, elem2 in enumerate(A):
             distance, path = fastdtw(elem1, elem2, dist=euclidean)
             res[i, j] = distance
+    return res
+
+
+def _correntropy(x, y):
+    s = 0.4
+    N = len(x)
+    V = np.average(np.exp(-0.5 * (x - y) ** 2 / s ** 2))
+    CIP = 0.0  # mean in feature space should be subtracted!!
+    for i in range(0, N):
+        CIP += np.average(np.exp(-0.5 * (x - y[i]) ** 2 / s ** 2)) / N
+    return V - CIP
+
+
+def _correntropy_PCA(A, s=0.4):
+    """
+    https://github.com/phuijse/correntropy_demos/blob/master/correntropy_pca_demo.ipynb
+    :param A: matrix (N, M)
+    :param s:
+    :return: correlation matrix (N, N)
+    """
+    res = pairwise_distances(A.T, metric=_correntropy, n_jobs=4)
     return res
